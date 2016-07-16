@@ -39,7 +39,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam);
 
 struct SocketPair {
 	SOCKET  user_proxy;      //socket : local machine to proxy server
-	SOCKET  proxy_server;    //socket : proxy sever to remote server
+	SOCKET  proxy_server;    //socket : proxy server to remote server
 	BOOL    IsUser_ProxyClosed; // status of local machine to proxy server
 	BOOL    IsProxy_ServerClosed; // status of proxy server to remote server
 };
@@ -251,6 +251,13 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 			strncat(Buffer, " ", 1);
 		Len = strlen("200 OK\r\n");
 		strncpy(Buffer, "200 OK", Len);
+
+#ifdef _DEBUG
+
+		Buffer[Len - 1] = 0;
+		printf("\n---------------------------\nSent %d bytes to client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+#endif
+
 		retval = send(SocketPair_struct.user_proxy, Buffer, Len, 0);
 
 		if (retval == SOCKET_ERROR)
@@ -287,6 +294,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 
 
 		Len = retval;
+
 #ifdef _DEBUG
 
 		Buffer[Len-1] = 0;
@@ -314,6 +322,12 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 
 	while (SocketPair_struct.IsProxy_ServerClosed == FALSE && SocketPair_struct.IsUser_ProxyClosed == FALSE)
 	{
+#ifdef _DEBUG
+
+		Buffer[Len - 1] = 0;
+		printf("\n---------------------------\nSending %d bytes to proxy_server\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+#endif
+
 		retval = send(SocketPair_struct.proxy_server, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR)
 		{
@@ -452,7 +466,7 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 		}
 #ifdef _DEBUG
 		Buffer[Len - 1] = 0;
-		printf("\n---------------------------\Sending %d bytes to server\nData:\n\n%s\n\n---------------------\n", Len, Buffer);
+		printf("\n---------------------------\Received from server and Sending %d bytes to user\nData:\n\n%s\n\n---------------------\n", Len, Buffer);
 #endif
 		retval = send(proxyparam_ptr->pPair->user_proxy, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR) {
@@ -461,10 +475,6 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 			proxyparam_ptr->pPair->IsUser_ProxyClosed = TRUE;
 			break;
 		}
-#ifdef _DEBUG	
-		Buffer[Len-1] = 0;
-		printf("\n------------------\nReceived %d bytes from server.\n\nData:\n%s\n\n---------------------\n", retval, Buffer);
-#endif
 	}
 	if (proxyparam_ptr->pPair->IsProxy_ServerClosed == FALSE)
 	{
