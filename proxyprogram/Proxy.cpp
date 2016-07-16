@@ -23,11 +23,13 @@ static char THIS_FILE[] = __FILE__;
 /////////////////////////////////////////////////////////////////////////////
 // The one and only application object
 
-#define HTTP  "http://"
-#define FTP   "ftp://"
-#define PROXYPORT    5060    //Proxy Listen Port
-#define BUFSIZE   10240      //Buffer size
-#define MAXPORTSIZE 5
+#define HTTP			"http://"
+#define FTP				"ftp://"
+#define PROXYPORT		5060    //Proxy Listen Port
+#define BUFSIZE			10240      //Buffer size
+#define MAXPORTSIZE		5
+#define MAXCOMMANDLEN	512
+#define MAXPROTOLEN		128
 
 
 using namespace std;
@@ -97,12 +99,15 @@ int CloseServer()
 }
 
 //Analisys the string, to find the remote address
-int GetAddressAndPort(char * str, char *address, int * port)
+int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* protocol)
 {
-	char buf[BUFSIZE], command[512], proto[128], *p, portBuff[MAXPORTSIZE];
+	char buf[BUFSIZE], command[MAXCOMMANDLEN], proto[MAXPROTOLEN], *p, portBuff[MAXPORTSIZE];
 	int i = 0, j;
 	sscanf(str, "%s%s%s", command, buf, proto);
 	p = strstr(buf, HTTP);
+
+	strncpy(protocol, proto, MAXPROTOLEN);
+
 	//HTTP
 	if (p)
 	{
@@ -128,7 +133,7 @@ int GetAddressAndPort(char * str, char *address, int * port)
 			*port = 80;      //default http port 
 		}
 	}
-	else
+	else if ((p = strstr(buf, FTP))!=NULL)
 	{//FTP, Not supported, and following code can be omitted.
 		p = strstr(buf, FTP);
 		if (!p) return 0;
@@ -149,19 +154,46 @@ int GetAddressAndPort(char * str, char *address, int * port)
 			for (j = 0; j < i + strlen(FTP); j++)
 				*(p + j) = ' ';
 	}
+	else
+	{
+		p = buf;
+		if (!p) return 0;
+		//p += strlen(FTP);
+		for (j = 0; j < strlen(p); j++)
+			if (*(p + j) == ':')
+			{
+				*port = atoi(p + j + 1);    //Get The Port
+				*(p + j) = 0;
+				break;
+			}
+			else *port = 80;
+
+
+		for (i = 0; i < strlen(p); i++)
+			if (*(p + i) == '/') break;      //Get The Remote Host
+		if (i != (strlen(p)-1)) // A '/' character was found
+			*(p + i) = 0;
+		else
+			*(p + j) = 0;
+
+
+		strcpy(address, p);
+		
+	}
+	memcpy(cmd, command, 512);
 	return 1;
 }
 
 // Setup chanel and read data from local , send data to remote
 unsigned int __stdcall UserToProxyThread(void *pParam)
 {
-	char Buffer[BUFSIZE];
+	char Buffer[BUFSIZE], command[MAXCOMMANDLEN], protocol[MAXPROTOLEN];
 	int  Len;
 	sockaddr_in from;
 	SOCKET msg_socket;
 	int fromlen, retval;
-	SocketPair SPair;
-	ProxyParam ProxyP;
+	SocketPair SocketPair_struct;
+	ProxyParam proxyparam_var;
 	HANDLE pChildThread;
 	fromlen = sizeof(from);
 	msg_socket = accept(gListen_Socket, (struct sockaddr*)&from, &fromlen);
@@ -175,103 +207,163 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 	HANDLE USERTOPROXYTHREADHANDLE = (HANDLE)_beginthreadex(NULL, 0, UserToProxyThread, NULL, 0, &thread_idn); //Start another thread to listen.
    //recieve the first line of client
 
-	SPair.IsUser_ProxyClosed = FALSE;
-	SPair.IsProxy_ServerClosed = TRUE;
-	SPair.user_proxy = msg_socket;
+	SocketPair_struct.IsUser_ProxyClosed = FALSE;
+	SocketPair_struct.IsProxy_ServerClosed = TRUE;
+	SocketPair_struct.user_proxy = msg_socket;
 
-	retval = recv(SPair.user_proxy, Buffer, sizeof(Buffer), 0);
+	retval = recv(SocketPair_struct.user_proxy, Buffer, sizeof(Buffer), 0);
 
 	if (retval == SOCKET_ERROR)
 	{
 		printf("\nError Recv");
-		if (SPair.IsUser_ProxyClosed == FALSE)
+		if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
 		{
-			closesocket(SPair.user_proxy);
-			SPair.IsUser_ProxyClosed = TRUE;
+			closesocket(SocketPair_struct.user_proxy);
+			SocketPair_struct.IsUser_ProxyClosed = TRUE;
 		}
 	}
 
 	if (retval == 0)
 	{
 		printf("Client Close connection\n");
-		if (SPair.IsUser_ProxyClosed == FALSE)
+		if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
 		{
-			closesocket(SPair.user_proxy);
-			SPair.IsUser_ProxyClosed = TRUE;
+			closesocket(SocketPair_struct.user_proxy);
+			SocketPair_struct.IsUser_ProxyClosed = TRUE;
 		}
 	}
+
+
 	Len = retval;
 #ifdef _DEBUG
 
-	Buffer[Len] = 0;
-	printf("\n Received %d bytes,data[%s]from client\n", retval, Buffer);
+	Buffer[Len-1] = 0;
+	printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
 #endif
-	//
-	SPair.IsUser_ProxyClosed = FALSE;
-	SPair.IsProxy_ServerClosed = TRUE;
-	SPair.user_proxy = msg_socket;
 
-	ProxyP.pPair = &SPair;
-	ProxyP.User_SvrOK = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-	GetAddressAndPort(Buffer, ProxyP.Address, &ProxyP.Port);
-	unsigned threadID;
-	pChildThread = (HANDLE)_beginthreadex(NULL, 0, ProxyToServer, (void *)&ProxyP, 0, &threadID);
-	::WaitForSingleObject(ProxyP.User_SvrOK, 60000);  //Wait for connection between proxy and remote server
-	::CloseHandle(ProxyP.User_SvrOK);
+	GetAddressAndPort(Buffer, proxyparam_var.Address, &proxyparam_var.Port, command, protocol);
 
-	while (SPair.IsProxy_ServerClosed == FALSE && SPair.IsUser_ProxyClosed == FALSE)
+	if (strncmp(command, "CONNECT", strlen("CONNECT")) == 0) // If command is CONNECT then reply with 200 OK and wait for input.
 	{
-		retval = send(SPair.proxy_server, Buffer, Len, 0);
+		memset(Buffer, 0, BUFSIZE);
+		strncat(Buffer, protocol, BUFSIZE);
+			strncat(Buffer, " ", 1);
+		Len = strlen("200 OK\r\n");
+		strncpy(Buffer, "200 OK", Len);
+		retval = send(SocketPair_struct.user_proxy, Buffer, Len, 0);
+
 		if (retval == SOCKET_ERROR)
 		{
-			printf("\n send() failed:error%d\n", WSAGetLastError());
-			if (SPair.IsProxy_ServerClosed == FALSE)
+			printf("\nError Send");
+			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
 			{
-				closesocket(SPair.proxy_server);
-				SPair.IsProxy_ServerClosed = TRUE;
+				closesocket(SocketPair_struct.user_proxy);
+				SocketPair_struct.IsUser_ProxyClosed = TRUE;
 			}
-			continue;
 		}
-		retval = recv(SPair.user_proxy, Buffer, sizeof(Buffer), 0);
+
+		retval = recv(SocketPair_struct.user_proxy, Buffer, sizeof(Buffer), 0);
 
 		if (retval == SOCKET_ERROR)
 		{
 			printf("\nError Recv");
-			if (SPair.IsUser_ProxyClosed == FALSE)
+			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
 			{
-				closesocket(SPair.user_proxy);
-				SPair.IsUser_ProxyClosed = TRUE;
+				closesocket(SocketPair_struct.user_proxy);
+				SocketPair_struct.IsUser_ProxyClosed = TRUE;
+			}
+		}
+
+		if (retval == 0)
+		{
+			printf("Client Close connection\n");
+			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
+			{
+				closesocket(SocketPair_struct.user_proxy);
+				SocketPair_struct.IsUser_ProxyClosed = TRUE;
+			}
+		}
+
+
+		Len = retval;
+#ifdef _DEBUG
+
+		Buffer[Len-1] = 0;
+		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+#endif
+
+
+		GetAddressAndPort(Buffer, proxyparam_var.Address, &proxyparam_var.Port, command, protocol);
+
+	}
+
+	//
+	SocketPair_struct.IsUser_ProxyClosed = FALSE;
+	SocketPair_struct.IsProxy_ServerClosed = TRUE;
+	SocketPair_struct.user_proxy = msg_socket;
+
+	proxyparam_var.pPair = &SocketPair_struct;
+	proxyparam_var.User_SvrOK = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+	//GetAddressAndPort(Buffer, ProxyP.Address, &ProxyP.Port, command);
+	unsigned threadID;
+	pChildThread = (HANDLE)_beginthreadex(NULL, 0, ProxyToServer, (void *)&proxyparam_var, 0, &threadID);
+	::WaitForSingleObject(proxyparam_var.User_SvrOK, 60000);  //Wait for connection between proxy and remote server
+	::CloseHandle(proxyparam_var.User_SvrOK);
+
+	while (SocketPair_struct.IsProxy_ServerClosed == FALSE && SocketPair_struct.IsUser_ProxyClosed == FALSE)
+	{
+		retval = send(SocketPair_struct.proxy_server, Buffer, Len, 0);
+		if (retval == SOCKET_ERROR)
+		{
+			printf("\n send() failed:error%d\n", WSAGetLastError());
+			if (SocketPair_struct.IsProxy_ServerClosed == FALSE)
+			{
+				closesocket(SocketPair_struct.proxy_server);
+				SocketPair_struct.IsProxy_ServerClosed = TRUE;
+			}
+			continue;
+		}
+		retval = recv(SocketPair_struct.user_proxy, Buffer, sizeof(Buffer), 0);
+
+		if (retval == SOCKET_ERROR)
+		{
+			printf("\nError Recv");
+			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
+			{
+				closesocket(SocketPair_struct.user_proxy);
+				SocketPair_struct.IsUser_ProxyClosed = TRUE;
 			}
 			continue;
 		}
 		if (retval == 0)
 		{
 			printf("Client Close connection\n");
-			if (SPair.IsUser_ProxyClosed == FALSE)
+			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
 			{
-				closesocket(SPair.user_proxy);
-				SPair.IsUser_ProxyClosed = TRUE;
+				closesocket(SocketPair_struct.user_proxy);
+				SocketPair_struct.IsUser_ProxyClosed = TRUE;
 			}
 			break;
 		}
 		Len = retval;
 #ifdef _DEBUG
-		Buffer[Len] = 0;
-		printf("\n Received %d bytes,data[%s]from client\n", retval, Buffer);
+		Buffer[Len-1] = 0;
+		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
 #endif
 
 	} //End While
 
-	if (SPair.IsProxy_ServerClosed == FALSE)
+	if (SocketPair_struct.IsProxy_ServerClosed == FALSE)
 	{
-		closesocket(SPair.proxy_server);
-		SPair.IsProxy_ServerClosed = TRUE;
+		closesocket(SocketPair_struct.proxy_server);
+		SocketPair_struct.IsProxy_ServerClosed = TRUE;
 	}
-	if (SPair.IsUser_ProxyClosed == FALSE)
+	if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
 	{
-		closesocket(SPair.user_proxy);
-		SPair.IsUser_ProxyClosed = TRUE;
+		closesocket(SocketPair_struct.user_proxy);
+		SocketPair_struct.IsUser_ProxyClosed = TRUE;
 	}
 	::WaitForSingleObject(pChildThread, 20000);  //Should check the return value
 	return 0;
@@ -280,105 +372,106 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 // Read data from remote and send data to local
 unsigned int __stdcall ProxyToServer(void *pParam)
 {
-	ProxyParam * pPar = (ProxyParam*)pParam;
+	ProxyParam * proxyparam_ptr = (ProxyParam*)pParam;
 	char Buffer[BUFSIZE];
 	char *server_name = "localhost";
 	unsigned short port;
 	int retval, Len;
-	unsigned int addr;
+	unsigned int server_addr;
 	int socket_type;
-	struct sockaddr_in server;
-	struct hostent *hp;
+	struct sockaddr_in server_sockaddr_in;
+	struct hostent *server_hostent_struct_ptr;
 	SOCKET  conn_socket;
 
 	socket_type = SOCK_STREAM;
-	server_name = pPar->Address;
-	port = pPar->Port;
+	server_name = proxyparam_ptr->Address;
+	port = proxyparam_ptr->Port;
 
 	if (isalpha(server_name[0])) {   /* server address is a name */
-		hp = gethostbyname(server_name);
+		server_hostent_struct_ptr = gethostbyname(server_name);
 	}
 	else { /* Convert nnn.nnn address to a usable one */
-		addr = inet_addr(server_name);
-		hp = gethostbyaddr((char *)&addr, 4, AF_INET);
+		server_addr = inet_addr(server_name);
+		server_hostent_struct_ptr = gethostbyaddr((char *)&server_addr, 4, AF_INET);
 	}
-	if (hp == NULL) {
-		fprintf(stderr, "Client: Cannot resolve address [%s]: Error %d\n",
+	if (server_hostent_struct_ptr == NULL) {
+		printf("\n\n[ERROR]: Client: Cannot resolve address [%s]: Error %d\n",
 			server_name, WSAGetLastError());
-		::SetEvent(pPar->User_SvrOK);
+		::SetEvent(proxyparam_ptr->User_SvrOK);
 		return 0;
 	}
 
 	//
 	// Copy the resolved information into the sockaddr_in structure
 	//
-	memset(&server, 0, sizeof(server));
-	memcpy(&(server.sin_addr), hp->h_addr, hp->h_length);
-	server.sin_family = hp->h_addrtype;
-	server.sin_port = htons(port);
+	memset(&server_sockaddr_in, 0, sizeof(server_sockaddr_in));
+	memcpy(&(server_sockaddr_in.sin_addr), server_hostent_struct_ptr->h_addr, server_hostent_struct_ptr->h_length);
+	server_sockaddr_in.sin_family = server_hostent_struct_ptr->h_addrtype;
+	server_sockaddr_in.sin_port = htons(port);
 
 	conn_socket = socket(AF_INET, socket_type, 0); /* Open a socket */
+	
 	if (conn_socket < 0) {
-		fprintf(stderr, "Client: Error Opening socket: Error %d\n",
+		printf("\n\n[ERROR]: Client: Error Opening socket: Error %d\n",
 			WSAGetLastError());
-		pPar->pPair->IsProxy_ServerClosed = TRUE;
-		::SetEvent(pPar->User_SvrOK);
+		proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
+		::SetEvent(proxyparam_ptr->User_SvrOK);
 		return -1;
 	}
 
 
 #ifdef _DEBUG
-	printf("Client connecting to: %s\n", hp->h_name);
+	printf("Client connecting to: %s\n", server_hostent_struct_ptr->h_name);
 #endif
-	if (connect(conn_socket, (struct sockaddr*)&server, sizeof(server))
+	if (connect(conn_socket, (struct sockaddr*)&server_sockaddr_in, sizeof(server_sockaddr_in))
 		== SOCKET_ERROR) {
-		fprintf(stderr, "connect() failed: %d\n", WSAGetLastError());
-		pPar->pPair->IsProxy_ServerClosed = TRUE;
-		::SetEvent(pPar->User_SvrOK);
+		printf("\n\n[ERROR]: connect() failed: %d\n", WSAGetLastError());
+		proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
+		::SetEvent(proxyparam_ptr->User_SvrOK);
 		return -1;
 	}
-	pPar->pPair->proxy_server = conn_socket;
-	pPar->pPair->IsProxy_ServerClosed = FALSE;
-	::SetEvent(pPar->User_SvrOK);
+	proxyparam_ptr->pPair->proxy_server = conn_socket;
+	proxyparam_ptr->pPair->IsProxy_ServerClosed = FALSE;
+	::SetEvent(proxyparam_ptr->User_SvrOK);
 	// cook up a string to send
-	while (!pPar->pPair->IsProxy_ServerClosed && !pPar->pPair->IsUser_ProxyClosed)
+	while (!proxyparam_ptr->pPair->IsProxy_ServerClosed && !proxyparam_ptr->pPair->IsUser_ProxyClosed) // Both connections are open
 	{
 		retval = recv(conn_socket, Buffer, sizeof(Buffer), 0);
 		if (retval == SOCKET_ERROR) {
-			fprintf(stderr, "recv() failed: error %d\n", WSAGetLastError());
+			printf("\n\n[ERROR]: recv() failed: error %d\n", WSAGetLastError());
 			closesocket(conn_socket);
-			pPar->pPair->IsProxy_ServerClosed = TRUE;
+			proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
 			break;
 		}
 		Len = retval;
 		if (retval == 0) {
 			printf("Server closed connection\n");
 			closesocket(conn_socket);
-			pPar->pPair->IsProxy_ServerClosed = TRUE;
+			proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
 			break;
 		}
 
-		retval = send(pPar->pPair->user_proxy, Buffer, Len, 0);
+		retval = send(proxyparam_ptr->pPair->user_proxy, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR) {
-			fprintf(stderr, "send() failed: error %d\n", WSAGetLastError());
-			closesocket(pPar->pPair->user_proxy);
-			pPar->pPair->IsUser_ProxyClosed = TRUE;
+			printf("\n\n[ERROR]: send() failed: error %d\n", WSAGetLastError());
+			closesocket(proxyparam_ptr->pPair->user_proxy);
+			proxyparam_ptr->pPair->IsUser_ProxyClosed = TRUE;
 			break;
 		}
 #ifdef _DEBUG	
-		Buffer[Len] = 0;
-		printf("Received %d bytes, data [%s] from server\n", retval, Buffer);
+		Buffer[Len-1] = 0;
+		printf("\n------------------\nReceived %d bytes from server.\n\nData:\n%s\n\n---------------------\n", retval, Buffer);
 #endif
 	}
-	if (pPar->pPair->IsProxy_ServerClosed == FALSE)
+	if (proxyparam_ptr->pPair->IsProxy_ServerClosed == FALSE)
 	{
-		closesocket(pPar->pPair->proxy_server);
-		pPar->pPair->IsProxy_ServerClosed = TRUE;
+		closesocket(proxyparam_ptr->pPair->proxy_server);
+		proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
 	}
-	if (pPar->pPair->IsUser_ProxyClosed == FALSE)
+	if (proxyparam_ptr->pPair->IsUser_ProxyClosed == FALSE)
 	{
-		closesocket(pPar->pPair->user_proxy);
-		pPar->pPair->IsUser_ProxyClosed = TRUE;
+		closesocket(proxyparam_ptr->pPair->user_proxy);
+		proxyparam_ptr->pPair->IsUser_ProxyClosed = TRUE;
 	}
 	return 1;
 }
@@ -387,7 +480,7 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 
 int main(int argc, TCHAR* argv[], TCHAR* envp[])
 {
-	int nRetCode = 0;
+	int nRetCode = 0; // Error code
 
 	try
 	{
