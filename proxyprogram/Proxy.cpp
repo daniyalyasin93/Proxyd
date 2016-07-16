@@ -327,7 +327,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 		Buffer[Len - 1] = 0;
 		printf("\n---------------------------\nSending %d bytes to proxy_server\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
 #endif
-
+		Buffer[Len - 1] = '\n';
 		retval = send(SocketPair_struct.proxy_server, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR)
 		{
