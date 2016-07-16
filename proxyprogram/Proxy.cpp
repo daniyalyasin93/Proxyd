@@ -438,7 +438,7 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 	{
 		retval = recv(conn_socket, Buffer, sizeof(Buffer), 0);
 		if (retval == SOCKET_ERROR) {
-			printf("\n\n[ERROR]: recv() failed: error %d\n", WSAGetLastError());
+			printf("\n\n[ERROR]: recv() from server failed: error %d\n", WSAGetLastError());
 			closesocket(conn_socket);
 			proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
 			break;
@@ -450,10 +450,13 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 			proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
 			break;
 		}
-
+#ifdef _DEBUG
+		Buffer[Len - 1] = 0;
+		printf("\n---------------------------\Sending %d bytes to server\nData:\n\n%s\n\n---------------------\n", Len, Buffer);
+#endif
 		retval = send(proxyparam_ptr->pPair->user_proxy, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR) {
-			printf("\n\n[ERROR]: send() failed: error %d\n", WSAGetLastError());
+			printf("\n\n[ERROR]: send() to server failed: error %d\n", WSAGetLastError());
 			closesocket(proxyparam_ptr->pPair->user_proxy);
 			proxyparam_ptr->pPair->IsUser_ProxyClosed = TRUE;
 			break;
