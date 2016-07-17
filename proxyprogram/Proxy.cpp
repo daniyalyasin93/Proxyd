@@ -188,6 +188,7 @@ int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* pr
 unsigned int __stdcall UserToProxyThread(void *pParam)
 {
 	char Buffer[BUFSIZE], command[MAXCOMMANDLEN], protocol[MAXPROTOLEN];
+	char buffer_end = 0; // This is for restoring the last byte of buffer after debug statements
 	int  Len;
 	sockaddr_in from;
 	SOCKET msg_socket;
@@ -236,9 +237,11 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 
 	Len = retval;
 #ifdef _DEBUG
-
+	buffer_end = Buffer[Len - 1];
 	Buffer[Len-1] = 0;
 	printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+	Buffer[Len - 1] = buffer_end;
+	buffer_end = 0;
 #endif
 
 
@@ -253,9 +256,11 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 		strncpy(Buffer, "200 OK", Len);
 
 #ifdef _DEBUG
-
+		buffer_end = Buffer[Len - 1];
 		Buffer[Len - 1] = 0;
 		printf("\n---------------------------\nSent %d bytes to client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+		Buffer[Len - 1] = buffer_end;
+		buffer_end = 0;
 #endif
 
 		retval = send(SocketPair_struct.user_proxy, Buffer, Len, 0);
@@ -296,9 +301,11 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 		Len = retval;
 
 #ifdef _DEBUG
-
+		buffer_end = Buffer[Len - 1];
 		Buffer[Len-1] = 0;
 		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+		Buffer[Len - 1] = buffer_end;
+		buffer_end = 0;
 #endif
 
 
@@ -323,11 +330,13 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 	while (SocketPair_struct.IsProxy_ServerClosed == FALSE && SocketPair_struct.IsUser_ProxyClosed == FALSE)
 	{
 #ifdef _DEBUG
-
+		buffer_end = Buffer[Len - 1];
 		Buffer[Len - 1] = 0;
-		printf("\n---------------------------\nSending %d bytes to proxy_server\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+		printf("\n---------------------------\nSending %d bytes to server\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+		Buffer[Len - 1] = buffer_end;
+		buffer_end = 0;
 #endif
-		Buffer[Len - 1] = '\n';
+		//Buffer[Len - 1] = '\n';
 		retval = send(SocketPair_struct.proxy_server, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR)
 		{
@@ -363,8 +372,11 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 		}
 		Len = retval;
 #ifdef _DEBUG
+		buffer_end = Buffer[Len - 1];
 		Buffer[Len-1] = 0;
 		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+		Buffer[Len - 1] = buffer_end;
+		buffer_end = 0;
 #endif
 
 	} //End While
@@ -389,6 +401,7 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 	ProxyParam * proxyparam_ptr = (ProxyParam*)pParam;
 	char Buffer[BUFSIZE];
 	char *server_name = "localhost";
+	char buffer_end = 0; // This is for restoring the last byte of buffer after debug statements
 	unsigned short port;
 	int retval, Len;
 	unsigned int server_addr;
@@ -465,8 +478,11 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 			break;
 		}
 #ifdef _DEBUG
+		buffer_end = Buffer[Len - 1];
 		Buffer[Len - 1] = 0;
 		printf("\n---------------------------\Received from server and Sending %d bytes to user\nData:\n\n%s\n\n---------------------\n", Len, Buffer);
+		Buffer[Len - 1] = buffer_end;
+		buffer_end = 0;
 #endif
 		retval = send(proxyparam_ptr->pPair->user_proxy, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR) {
