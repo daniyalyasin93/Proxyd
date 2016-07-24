@@ -233,18 +233,20 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 			SocketPair_struct.IsUser_ProxyClosed = TRUE;
 		}
 	}
+	else
+	{
 
-
-	Len = retval;
+		Len = retval;
 #ifdef _DEBUG
-	buffer_end = Buffer[Len - 1];
-	Buffer[Len-1] = 0;
-	printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
-	Buffer[Len - 1] = buffer_end;
-	buffer_end = 0;
+		buffer_end = (Len > 0)? Buffer[Len - 1] : 0 ;
+
+		if (Len > 0) Buffer[Len - 1] = 0;
+		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+		if (Len > 0 ) Buffer[Len - 1] = buffer_end;
+		buffer_end = 0;
 #endif
-
-
+	}
+	Len = retval;
 	GetAddressAndPort(Buffer, proxyparam_var.Address, &proxyparam_var.Port, command, protocol);
 
 	if (strncmp(command, "CONNECT", strlen("CONNECT")) == 0) // If command is CONNECT then reply with 200 OK and wait for input.
@@ -252,18 +254,21 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 		memset(Buffer, 0, BUFSIZE);
 		strncat(Buffer, protocol, BUFSIZE);
 			strncat(Buffer, " ", 1);
-		Len = strlen("200 OK\r\n");
-		strncpy(Buffer, "200 OK", Len);
+			char response_to_connect[] = "HTTP/1.1 200 Connection established\r\nProxy-agent: dan_proxy/1.0\r\n\r\n";
+		Len = strlen(response_to_connect);
+		strncpy(Buffer, response_to_connect, Len);
 
 #ifdef _DEBUG
-		buffer_end = Buffer[Len - 1];
-		Buffer[Len - 1] = 0;
+		buffer_end = (Len > 0)? Buffer[Len - 1] : 0 ;
+
+		if (Len > 0 ) Buffer[Len - 1] = 0;
 		printf("\n---------------------------\nSent %d bytes to client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
-		Buffer[Len - 1] = buffer_end;
+		if (Len > 0 ) Buffer[Len - 1] = buffer_end;
 		buffer_end = 0;
 #endif
 
 		retval = send(SocketPair_struct.user_proxy, Buffer, Len, 0);
+		memset(Buffer, 0, BUFSIZ);
 
 		if (retval == SOCKET_ERROR)
 		{
@@ -274,42 +279,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 				SocketPair_struct.IsUser_ProxyClosed = TRUE;
 			}
 		}
-
-		retval = recv(SocketPair_struct.user_proxy, Buffer, sizeof(Buffer), 0);
-
-		if (retval == SOCKET_ERROR)
-		{
-			printf("\nError Recv");
-			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
-			{
-				closesocket(SocketPair_struct.user_proxy);
-				SocketPair_struct.IsUser_ProxyClosed = TRUE;
-			}
-		}
-
-		if (retval == 0)
-		{
-			printf("Client Close connection\n");
-			if (SocketPair_struct.IsUser_ProxyClosed == FALSE)
-			{
-				closesocket(SocketPair_struct.user_proxy);
-				SocketPair_struct.IsUser_ProxyClosed = TRUE;
-			}
-		}
-
-
-		Len = retval;
-
-#ifdef _DEBUG
-		buffer_end = Buffer[Len - 1];
-		Buffer[Len-1] = 0;
-		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
-		Buffer[Len - 1] = buffer_end;
-		buffer_end = 0;
-#endif
-
-
-		GetAddressAndPort(Buffer, proxyparam_var.Address, &proxyparam_var.Port, command, protocol);
+		Len = 0;
 
 	}
 
@@ -330,10 +300,11 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 	while (SocketPair_struct.IsProxy_ServerClosed == FALSE && SocketPair_struct.IsUser_ProxyClosed == FALSE)
 	{
 #ifdef _DEBUG
-		buffer_end = Buffer[Len - 1];
-		Buffer[Len - 1] = 0;
+		buffer_end = (Len > 0)? Buffer[Len - 1] : 0 ;
+
+		if (Len > 0 ) Buffer[Len - 1] = 0;
 		printf("\n---------------------------\nSending %d bytes to server\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
-		Buffer[Len - 1] = buffer_end;
+		if (Len > 0 ) Buffer[Len - 1] = buffer_end;
 		buffer_end = 0;
 #endif
 		retval = send(SocketPair_struct.proxy_server, Buffer, Len, 0);
@@ -369,14 +340,20 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 			}
 			break;
 		}
-		Len = retval;
+		else
+		{
+
+			Len = retval;
 #ifdef _DEBUG
-		buffer_end = Buffer[Len - 1];
-		Buffer[Len-1] = 0;
-		printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
-		Buffer[Len - 1] = buffer_end;
-		buffer_end = 0;
+			buffer_end = (Len > 0)? Buffer[Len - 1] : 0 ;
+
+			if (Len > 0) Buffer[Len - 1] = 0;
+			printf("\n---------------------------\nReceived %d bytes from client\nData:\n\n%s\n\n---------------------\n", retval, Buffer);
+			if (Len > 0 ) Buffer[Len - 1] = buffer_end;
+			buffer_end = 0;
 #endif
+		}
+		Len = retval;
 
 	} //End While
 
@@ -476,13 +453,18 @@ unsigned int __stdcall ProxyToServer(void *pParam)
 			proxyparam_ptr->pPair->IsProxy_ServerClosed = TRUE;
 			break;
 		}
+		else
+		{
+
 #ifdef _DEBUG
-		buffer_end = Buffer[Len - 1];
-		Buffer[Len - 1] = 0;
-		printf("\n---------------------------\Received from server and Sending %d bytes to user\nData:\n\n%s\n\n---------------------\n", Len, Buffer);
-		Buffer[Len - 1] = buffer_end;
-		buffer_end = 0;
+			buffer_end = (Len > 0)? Buffer[Len - 1] : 0 ;
+
+			if (Len > 0 ) Buffer[Len - 1] = 0;
+			printf("\n---------------------------Received from server and Sending %d bytes to user\nData:\n\n%s\n\n---------------------\n", Len, Buffer);
+			if (Len > 0 ) Buffer[Len - 1] = buffer_end;
+			buffer_end = 0;
 #endif
+		}
 		retval = send(proxyparam_ptr->pPair->user_proxy, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR) {
 			printf("\n\n[ERROR]: send() to server failed: error %d\n", WSAGetLastError());
