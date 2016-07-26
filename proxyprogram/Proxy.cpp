@@ -535,8 +535,6 @@ int main(int argc, TCHAR* argv[], TCHAR* envp[])
 		CloseServer();
 	}
 	
-
-
 	return nRetCode;
 }
 
