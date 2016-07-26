@@ -30,12 +30,12 @@ static char THIS_FILE[] = __FILE__;
 #define MAXPORTSIZE		5
 #define MAXCOMMANDLEN	512
 #define MAXPROTOLEN		128
-
+#define BACKLOG			5
 
 using namespace std;
 
-unsigned int __stdcall ProxyToServer(void *pParam);
-unsigned int __stdcall UserToProxyThread(void *pParam);
+unsigned int __stdcall UpstreamCommunication(void *pParam);
+unsigned int __stdcall DownstreamCommunication(void *pParam);
 
 struct SocketPair {
 	SOCKET  user_proxy;      //socket : local machine to proxy server
@@ -65,29 +65,30 @@ int StartServer()
 		printf("\nError in Startup session.\n"); WSACleanup(); return -1;
 	};
 
-	local.sin_family = AF_INET;
-	local.sin_addr.s_addr = INADDR_ANY;
-	local.sin_port = htons(PROXYPORT);
+	local.sin_family = AF_INET; // IPv4 address family
+	local.sin_addr.s_addr = INADDR_ANY; // Listen at any interface
+	local.sin_port = htons(PROXYPORT); // Port number 5060
 
 	listen_socket = socket(AF_INET, SOCK_STREAM, 0);
+
 	if (listen_socket == INVALID_SOCKET)
 	{
-		printf("\nError in New a Socket."); WSACleanup(); return -2;
+		printf("\nError in initialization of Socket."); WSACleanup(); return -2;
 	}
 
-	if (::bind(listen_socket, (sockaddr *)&local, sizeof(local)) != 0)
+	if (bind(listen_socket, (sockaddr *)&local, sizeof(local)) != 0)
 	{
-		printf("\n Error in Binding socket.");	WSACleanup(); return -3;
+		printf("\nError in binding socket.");	WSACleanup(); return -3;
 	};
 
-	if (::listen(listen_socket, 5) != 0)
+	if (listen(listen_socket, BACKLOG) != 0)
 	{
-		printf("\n Error in Listen."); WSACleanup(); return -4;
+		printf("\nError in listening to socket"); WSACleanup(); return -4;
 	}
 	gListen_Socket = listen_socket;
 	//_beginthreadex(UserToProxyThread,0, NULL);   //Start accept function
 	unsigned thread_idn;
-	HANDLE USERTOPROXYTHREADHANDLE = (HANDLE)_beginthreadex(NULL, 0, UserToProxyThread, NULL, 0, &thread_idn); //Start another thread to listen.
+	HANDLE USERTOPROXYTHREADHANDLE = (HANDLE)_beginthreadex(NULL, 0, DownstreamCommunication, NULL, 0, &thread_idn); //Start another thread to listen.
 	return 1;
 }
 
@@ -184,8 +185,8 @@ int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* pr
 	return 1;
 }
 
-// Setup chanel and read data from local , send data to remote
-unsigned int __stdcall UserToProxyThread(void *pParam)
+// Setup channel and read data from local , send data to remote
+unsigned int __stdcall DownstreamCommunication(void *pParam)
 {
 	char Buffer[BUFSIZE], command[MAXCOMMANDLEN], protocol[MAXPROTOLEN];
 	char buffer_end = 0; // This is for restoring the last byte of buffer after debug statements
@@ -205,7 +206,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 		printf("\nError  in accept "); return -5;
 	}
 
-	HANDLE USERTOPROXYTHREADHANDLE = (HANDLE)_beginthreadex(NULL, 0, UserToProxyThread, NULL, 0, &thread_idn); //Start another thread to listen.
+	HANDLE USERTOPROXYTHREADHANDLE = (HANDLE)_beginthreadex(NULL, 0, DownstreamCommunication, NULL, 0, &thread_idn); //Start another thread to listen.
    //recieve the first line of client
 
 	SocketPair_struct.IsUser_ProxyClosed = FALSE;
@@ -293,7 +294,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 
 	//GetAddressAndPort(Buffer, ProxyP.Address, &ProxyP.Port, command);
 	unsigned threadID;
-	pChildThread = (HANDLE)_beginthreadex(NULL, 0, ProxyToServer, (void *)&proxyparam_var, 0, &threadID);
+	pChildThread = (HANDLE)_beginthreadex(NULL, 0, UpstreamCommunication, (void *)&proxyparam_var, 0, &threadID);
 	::WaitForSingleObject(proxyparam_var.User_SvrOK, 60000);  //Wait for connection between proxy and remote server
 	::CloseHandle(proxyparam_var.User_SvrOK);
 
@@ -372,7 +373,7 @@ unsigned int __stdcall UserToProxyThread(void *pParam)
 }
 
 // Read data from remote and send data to local
-unsigned int __stdcall ProxyToServer(void *pParam)
+unsigned int __stdcall UpstreamCommunication(void *pParam)
 {
 	ProxyParam * proxyparam_ptr = (ProxyParam*)pParam;
 	char Buffer[BUFSIZE];
