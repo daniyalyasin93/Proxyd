@@ -228,7 +228,7 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 		{
 			closesocket(SocketPair_struct.downstream);
 			SocketPair_struct.IsDownstreamDisconnected = TRUE;
-			return;
+			return -1;
 		}
 	}
 
@@ -239,7 +239,7 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 		{
 			closesocket(SocketPair_struct.downstream);
 			SocketPair_struct.IsDownstreamDisconnected = TRUE;
-			return;
+			return -1;
 		}
 	}
 	else
@@ -266,7 +266,7 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 		{
 			closesocket(SocketPair_struct.downstream);
 			SocketPair_struct.IsDownstreamDisconnected = TRUE;
-			return;
+			return -1;
 		}
 	}
 
