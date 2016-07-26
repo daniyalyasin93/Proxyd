@@ -3,13 +3,17 @@
 // e-mail daniyalyasin93@gmail.com
 // 26-07-2016
 
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <windows.h>
+#endif
+
 #include <iostream>
 #include "Proxy.h"
-#include <winsock2.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <windows.h>
 #include <process.h>
 
 
@@ -55,14 +59,16 @@ SOCKET    gListen_Socket;
 
 int StartServer()
 {
-	WSADATA wsaData;
-	sockaddr_in local;
 	SOCKET listen_socket;
+	sockaddr_in local;
+#ifdef _WIN32
+	WSADATA wsaData;
 
 	if (::WSAStartup(0x202, &wsaData) != 0)
 	{
 		printf("\nError in Startup session.\n"); WSACleanup(); return -1;
 	};
+#endif // _WIN32
 
 	local.sin_family = AF_INET; // IPv4 address family
 	local.sin_addr.s_addr = INADDR_ANY; // Listen at any interface
@@ -72,17 +78,23 @@ int StartServer()
 
 	if (listen_socket == INVALID_SOCKET)
 	{
+#ifdef _WIN32
 		printf("\nError in initialization of Socket."); WSACleanup(); return -2;
+#endif
 	}
 
 	if (bind(listen_socket, (sockaddr *)&local, sizeof(local)) != 0)
 	{
+#ifdef _WIN32
 		printf("\nError in binding socket.");	WSACleanup(); return -3;
+#endif
 	};
 
 	if (listen(listen_socket, BACKLOG) != 0)
 	{
+#ifdef _WIN32
 		printf("\nError in listening to socket"); WSACleanup(); return -4;
+#endif
 	}
 	
 	gListen_Socket = listen_socket; // Assign value to global listening socket variable
@@ -95,7 +107,9 @@ int StartServer()
 int CloseServer()
 {
 	closesocket(gListen_Socket);
+#ifdef _WIN32
 	WSACleanup();
+#endif
 	return 1;
 }
 
@@ -315,13 +329,18 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 	SocketPair_struct.downstream = msg_socket;
 
 	proxyparam_var.pPair = &SocketPair_struct;
+#ifdef _WIN32
 	proxyparam_var.User_SvrOK = CreateEvent(NULL, TRUE, FALSE, NULL);
+#endif
 
 	//GetAddressAndPort(Buffer, ProxyP.Address, &ProxyP.Port, command);
 	unsigned threadID;
 	pChildThread = (HANDLE)_beginthreadex(NULL, 0, UpstreamCommunication, (void *)&proxyparam_var, 0, &threadID);
+#ifdef _WIN32
 	::WaitForSingleObject(proxyparam_var.User_SvrOK, 60000);  // Wait for connection between proxy and remote server. Timeout is 60 seconds
 	::CloseHandle(proxyparam_var.User_SvrOK);
+#endif
+	
 
 	while (SocketPair_struct.IsUpstreamDisconnected == FALSE && SocketPair_struct.IsDownstreamDisconnected == FALSE) // Loop to forward communication from client to server and vice versa
 	{
@@ -336,7 +355,9 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 		retval = send(SocketPair_struct.upstream, Buffer, Len, 0); // Forwards client's message to server
 		if (retval == SOCKET_ERROR)
 		{
+#ifdef _WIN32
 			printf("\n send() failed:error%d\n", WSAGetLastError());
+#endif
 			if (SocketPair_struct.IsUpstreamDisconnected == FALSE)
 			{
 				closesocket(SocketPair_struct.upstream);
@@ -393,7 +414,9 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 		closesocket(SocketPair_struct.downstream);
 		SocketPair_struct.IsDownstreamDisconnected = TRUE;
 	}
+#ifdef _WIN32
 	::WaitForSingleObject(pChildThread, 20000);  //Should check the return value
+#endif
 	return 0;
 }
 
@@ -424,8 +447,10 @@ unsigned int __stdcall UpstreamCommunication(void *pParam)
 		server_hostent_struct_ptr = gethostbyaddr((char *)&server_addr, 4, AF_INET);
 	}
 	if (server_hostent_struct_ptr == NULL) {
+#ifdef _WIN32
 		printf("\n\n[ERROR]: Proxy server: Cannot resolve address [%s]: Error %d\n",
 			server_name, WSAGetLastError());
+#endif
 		::SetEvent(proxyparam_ptr->User_SvrOK);
 		return 0;
 	}
@@ -441,8 +466,10 @@ unsigned int __stdcall UpstreamCommunication(void *pParam)
 	conn_socket = socket(AF_INET, socket_type, 0); /* Open a socket */
 	
 	if (conn_socket < 0) {
+#ifdef _WIN32
 		printf("\n\n[ERROR]: Client: Error Opening socket: Error %d\n",
 			WSAGetLastError());
+#endif
 		proxyparam_ptr->pPair->IsUpstreamDisconnected = TRUE;
 		::SetEvent(proxyparam_ptr->User_SvrOK);
 		return -1;
@@ -454,23 +481,31 @@ unsigned int __stdcall UpstreamCommunication(void *pParam)
 #endif
 	if (connect(conn_socket, (struct sockaddr*)&server_sockaddr_in, sizeof(server_sockaddr_in))
 		== SOCKET_ERROR) {
+#ifdef _WIN32
 		printf("\n\n[ERROR]: connect() failed: %d\n", WSAGetLastError());
+#endif
 		proxyparam_ptr->pPair->IsUpstreamDisconnected = TRUE;
+#ifdef _WIN32
 		::SetEvent(proxyparam_ptr->User_SvrOK);
+#endif
 		return -1;
 	}
 
 	// Connected to remote server
 	proxyparam_ptr->pPair->upstream = conn_socket;
 	proxyparam_ptr->pPair->IsUpstreamDisconnected = FALSE;
+#ifdef _WIN32
 	::SetEvent(proxyparam_ptr->User_SvrOK);
+#endif
 	
 	// Loop to forward communication between client and remote server
 	while (!proxyparam_ptr->pPair->IsUpstreamDisconnected && !proxyparam_ptr->pPair->IsDownstreamDisconnected) // Both connections are open
 	{
 		retval = recv(conn_socket, Buffer, sizeof(Buffer), 0); // Receive from remote server
 		if (retval == SOCKET_ERROR) {
+#ifdef _WIN32
 			printf("\n\n[ERROR]: recv() from server failed: error %d\n", WSAGetLastError());
+#endif
 			closesocket(conn_socket);
 			proxyparam_ptr->pPair->IsUpstreamDisconnected = TRUE;
 			break;
@@ -497,7 +532,9 @@ unsigned int __stdcall UpstreamCommunication(void *pParam)
 		// Forward remote server's message to client
 		retval = send(proxyparam_ptr->pPair->downstream, Buffer, Len, 0);
 		if (retval == SOCKET_ERROR) {
+#ifdef _WIN32
 			printf("\n\n[ERROR]: send() to server failed: error %d\n", WSAGetLastError());
+#endif
 			closesocket(proxyparam_ptr->pPair->downstream);
 			proxyparam_ptr->pPair->IsDownstreamDisconnected = TRUE;
 			break;
