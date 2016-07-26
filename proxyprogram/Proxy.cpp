@@ -275,12 +275,12 @@ unsigned int __stdcall DownstreamCommunication(void *pParam)
 		memset(Buffer, 0, BUFSIZE);
 		strncat(Buffer, protocol, BUFSIZE);
 			strncat(Buffer, " ", 1);
-			char response_to_connect[] = "HTTP/1.1 200 Connection established\r\nProxy-agent: ";
+			char response_to_connect[100] = "HTTP/1.1 200 Connection established\r\nProxy-agent: ";
 			strncat(response_to_connect, PROXY_AGENT, strnlen(PROXY_AGENT, 10));
 			strncat(response_to_connect, "/", 1);
 			strncat(response_to_connect, VERSION, 3);
 			strncat(response_to_connect, "\r\n\r\n", 4);
-			response_to_connect[50] = 0;	// To guard against buffer overflows
+			response_to_connect[99] = 0;	// To guard against buffer overflows
 		Len = strlen(response_to_connect);
 		strncpy(Buffer, response_to_connect, Len);
 
