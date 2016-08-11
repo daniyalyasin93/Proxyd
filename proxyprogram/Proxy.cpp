@@ -278,7 +278,12 @@ void* DownstreamCommunication(void *pParam)
 #ifdef _WIN32	
 	HANDLE pChildThread;
 	int fromlen;
+
+#elif defined __linux__
+	unsigned int fromlen;
+
 #endif
+
 	fromlen = sizeof(from);
 
 	msg_socket = accept(gListen_Socket, (struct sockaddr*)&from, &fromlen); // Block until connection received
