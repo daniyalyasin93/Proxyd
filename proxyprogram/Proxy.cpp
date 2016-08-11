@@ -272,11 +272,12 @@ void* DownstreamCommunication(void *pParam)
 	int  Len;
 	sockaddr_in from; // Caller address is stored in this structure
 	SOCKET msg_socket;
-	unsigned int fromlen, retval;
+	unsigned int retval;
 	SocketPair SocketPair_struct;
 	ProxyParam proxyparam_var;
 #ifdef _WIN32	
 	HANDLE pChildThread;
+	int fromlen;
 #endif
 	fromlen = sizeof(from);
 
