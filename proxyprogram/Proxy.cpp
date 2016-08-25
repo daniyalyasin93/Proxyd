@@ -130,7 +130,7 @@ int StartServer()
 #ifdef _WIN32
 		printf("\nError in initialization of Socket."); WSACleanup(); return -2;
 #elif defined __linux__
-		printf("\nError in initialization of Socket."); 
+		printf("\nError in initialization of Socket."); return  -2;
 #endif
 	}
 
@@ -139,7 +139,7 @@ int StartServer()
 #ifdef _WIN32
 		printf("\nError in binding socket.");	WSACleanup(); return -3;
 #elif defined __linux__
-		printf("\nError in binding socket."); 
+		printf("\nError in binding socket."); return -3;
 #endif
 	};
 
@@ -148,7 +148,7 @@ int StartServer()
 #ifdef _WIN32
 		printf("\nError in listening to socket"); WSACleanup(); return -4;
 #elif defined __linux__
-		printf("\nError in listening to socket"); 
+		printf("\nError in listening to socket"); return -4;
 #endif
 	}
 	
@@ -187,7 +187,7 @@ int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* pr
 		return -1;
 
 	p = strstr(buf, HTTP);
-
+	memset(address, 0, MAXADDRESSLEN);
 	strncpy(protocol, proto, MAXPROTOLEN);
 
 	//HTTP
@@ -333,13 +333,16 @@ void* DownstreamCommunication(void *pParam)
 		printf("Client Close connection\n");
 		if (SocketPair_struct.IsDownstreamDisconnected == FALSE)
 		{
+			SocketPair_struct.IsDownstreamDisconnected = TRUE;
 			#ifdef	_WIN32
 			closesocket(SocketPair_struct.downstream);
+			return -1;
 			#elif defined	__linux__
 			close(SocketPair_struct.downstream);
+			return (void*)-1;
 			#endif
 			
-			SocketPair_struct.IsDownstreamDisconnected = TRUE;
+			
 //			return -1;
 		}
 	}
@@ -365,15 +368,19 @@ void* DownstreamCommunication(void *pParam)
 		printf("\nUnknown response");
 		if (SocketPair_struct.IsDownstreamDisconnected == FALSE)
 		{
+			SocketPair_struct.IsDownstreamDisconnected = TRUE;
 			#ifdef	_WIN32
 			closesocket(SocketPair_struct.downstream);
+			return -1;
 			#elif defined	__linux__
 			close(SocketPair_struct.downstream);
+			return (void*) -1;
 			#endif
-			SocketPair_struct.IsDownstreamDisconnected = TRUE;
+			
 //			return -1;
 		}
 	}
+
 
 	if (strncmp(command, "CONNECT", strlen("CONNECT")) == 0) // If command is CONNECT then reply with 200 OK and wait for input.
 	{
@@ -454,6 +461,9 @@ void* DownstreamCommunication(void *pParam)
     timeToWait.tv_sec = now.tv_sec+60;
     timeToWait.tv_nsec = (now.tv_usec*1000UL) + ((60*1000)%1000UL)*1000000;
     timeToWait.tv_nsec %= 1000000000;
+
+    if (proxyparam_var.Address[0] == 0)
+			proxyparam_var.Address[0] = 0;
 
 	pthread_t pChildThread;
 	pthread_create(&pChildThread, NULL, UpstreamCommunication, (void *)&proxyparam_var);
@@ -574,6 +584,7 @@ void* DownstreamCommunication(void *pParam)
 	}
 #ifdef _WIN32
 	::WaitForSingleObject(pChildThread, 20000);  //Should check the return value
+	return 0;
 #elif defined __linux__
 	rt = 0;
     gettimeofday(&now,NULL);
@@ -588,6 +599,8 @@ void* DownstreamCommunication(void *pParam)
 		rt = pthread_cond_timedwait(&proxyparam_var.ThreadExitCond, &proxyparam_var.lock, &timeToWait);
 	pthread_mutex_unlock(&proxyparam_var.lock);
 	pthread_cond_destroy(&proxyparam_var.ThreadExitCond);
+
+	return (void*)0;
 #endif
 //	return 0;
 }
@@ -611,7 +624,7 @@ void* UpstreamCommunication(void *pParam)
 	struct hostent *server_hostent_struct_ptr;
 	SOCKET  conn_socket;
 
-	proxyparam_ptr->Address[MAXADDRESSLEN]=0;
+	//proxyparam_ptr->Address[MAXADDRESSLEN]=0;
 	socket_type = SOCK_STREAM;
 	server_name = proxyparam_ptr->Address;	// Address of the remote server from the client's request
 	printf("UpstreamCommunication: Server connecting to %s", proxyparam_ptr->Address);
@@ -620,7 +633,7 @@ void* UpstreamCommunication(void *pParam)
 	if (isalpha(server_name[0])) {   /* server address is a name */
 		server_hostent_struct_ptr = gethostbyname(server_name);
 	}
-	else { /* Convert nnn.nnn address to a usable one */
+	else { /* Convert nnn.nnn address to a btusable one */
 		server_addr = inet_addr(server_name);
 		server_hostent_struct_ptr = gethostbyaddr((char *)&server_addr, 4, AF_INET);
 	}
@@ -629,14 +642,18 @@ void* UpstreamCommunication(void *pParam)
 		printf("\n\n[ERROR]: Proxy server: Cannot resolve address [%s]: Error %d\n",
 			server_name, WSAGetLastError());
 		::SetEvent(proxyparam_ptr->User_SvrOK);
+		return 0;
 #elif defined __linux__
+
+		if (server_name[0] == 0)
+			server_name[0] = 0;
 		printf("\n\n[ERROR]: Proxy server: Cannot resolve address [%s]\n",
 			server_name);
 		pthread_mutex_lock(&proxyparam_ptr->lock);
 		proxyparam_ptr->User_SvrOK = TRUE;
 		pthread_cond_signal(&proxyparam_ptr->cond);
 		pthread_mutex_unlock(&proxyparam_ptr->lock);
-		
+		return (void*) 0;
 #endif
 		
 		////return 0;
@@ -659,8 +676,10 @@ void* UpstreamCommunication(void *pParam)
 			WSAGetLastError());
 		
 		::SetEvent(proxyparam_ptr->User_SvrOK);
+		return -1;
 #elif defined __linux__
 		printf("\n\n[ERROR]: Client: Error Opening socket\n");
+		return (void*) -1;
 #endif
 		
 		////return -1;
@@ -676,6 +695,7 @@ void* UpstreamCommunication(void *pParam)
 #ifdef _WIN32
 		printf("\n\n[ERROR]: connect() failed: %d\n", WSAGetLastError());
 		::SetEvent(proxyparam_ptr->User_SvrOK);
+		return -1;
 #elif defined __linux__
 		perror("\n\n[ERROR]: connect() failed\n");
 		dprintf("UpstreamCommunication: before pthread_mutex_lock\n");
@@ -687,7 +707,7 @@ void* UpstreamCommunication(void *pParam)
 		pthread_mutex_unlock(&proxyparam_ptr->lock);
 		dprintf("UpstreamCommunication: after pthread_mutex_lock\n");
 		
-		
+		return (void*) -1;
 #endif
 		////return -1;
 	}
@@ -773,12 +793,15 @@ void* UpstreamCommunication(void *pParam)
 	}
 	if (proxyparam_ptr->pPair->IsDownstreamDisconnected == FALSE)
 	{
+		proxyparam_ptr->pPair->IsDownstreamDisconnected = TRUE;
 #ifdef _WIN32		
 		closesocket(proxyparam_ptr->pPair->downstream);
+		return 1;
 #elif defined __linux__
 		close(proxyparam_ptr->pPair->downstream);
+		return (void*) 1;
 #endif
-		proxyparam_ptr->pPair->IsDownstreamDisconnected = TRUE;
+		
 	}
 	//return 1;
 }
