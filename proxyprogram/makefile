@@ -1,2 +1,2 @@
-proxy: Proxy.cpp Proxy.h
-	gcc -g -pthread -o proxy Proxy.cpp -lstdc++ 2> output.txt
+proxy: Proxy.cpp
+		gcc -g -Wall -Wextra -pthread -o proxy Proxy.cpp -lstdc++ 2> output.txt

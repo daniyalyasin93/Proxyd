@@ -18,6 +18,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <netdb.h>
+#include <errno.h>
 #endif
 
 #include <iostream>
@@ -26,7 +27,12 @@
 #include <stdio.h>
 #include <string.h>
 
-
+void dprintf(const char str [])
+{
+	#ifdef _DEBUG
+	printf(str);
+	#endif
+}
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -41,6 +47,7 @@ static char THIS_FILE[] = __FILE__;
 #define MAXPORTSIZE		5
 #define MAXCOMMANDLEN	512
 #define MAXPROTOLEN		128
+#define MAXADDRESSLEN	8168
 #define BACKLOG			5
 #define PROXY_AGENT		"dan_proxy"
 #define VERSION			"1.0"
@@ -75,7 +82,7 @@ struct SocketPair {
 
 
 struct ProxyParam {
-	char Address[256];    // address of remote server
+	char Address[MAXADDRESSLEN];    // address of remote server
 	SocketPair *pPair;    // pointer to socket pair
 	int     Port;         // port which will be used to connect to remote server
 #ifdef _WIN32
@@ -147,7 +154,6 @@ int StartServer()
 	
 	gListen_Socket = listen_socket; // Assign value to global listening socket variable
 	
-	unsigned thread_idn; // Receives thread identifier
 	#ifdef _WIN32
 	HANDLE USERTOPROXYTHREADHANDLE = (HANDLE)_beginthreadex(NULL, 0, DownstreamCommunication, NULL, 0, &thread_idn); //Start another thread to listen.
 	#elif defined __linux__
@@ -202,7 +208,7 @@ int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* pr
 		else
 		{
 			*(p + i) = 0;
-			strcpy(address, p);
+			strncpy(address, p, MAXADDRESSLEN-1);
 			p = strstr(str, HTTP);
 			for (j = 0; j < i + strlen(HTTP); j++)
 				*(p + j) = ' ';						//to remove the host name: GET http://www.njust.edu.cn/ HTTP1.1  ==> GET / HTTP1.1
@@ -225,7 +231,7 @@ int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* pr
 			}
 			else *port = 21;
 
-			strcpy(address, p);
+			strncpy(address, p, MAXADDRESSLEN-1);
 			p = strstr(str, FTP);
 			for (j = 0; j < i + strlen(FTP); j++)
 				*(p + j) = ' ';
@@ -253,7 +259,7 @@ int GetAddressAndPort(char * str, char *address, int * port, char *cmd, char* pr
 			*(p + j) = 0;
 
 
-		strcpy(address, p);
+		strncpy(address, p, MAXADDRESSLEN-1);
 		
 	}
 	memcpy(cmd, command, 512);
@@ -446,18 +452,28 @@ void* DownstreamCommunication(void *pParam)
 
 
     timeToWait.tv_sec = now.tv_sec+60;
-    timeToWait.tv_nsec = (now.tv_usec+1000UL*60000)*1000UL;
+    timeToWait.tv_nsec = (now.tv_usec*1000UL) + ((60*1000)%1000UL)*1000000;
+    timeToWait.tv_nsec %= 1000000000;
 
 	pthread_t pChildThread;
 	pthread_create(&pChildThread, NULL, UpstreamCommunication, (void *)&proxyparam_var);
 
 
-
+	dprintf("Locking mutex in downstream thread\n");
 	pthread_mutex_lock(&proxyparam_var.lock);
 
 	while ((proxyparam_var.User_SvrOK == FALSE)&&(rt!=ETIMEDOUT))
-		rt = pthread_cond_timedwait(&proxyparam_var.cond, &proxyparam_var.lock, &timeToWait);
+		{
+			dprintf("In locked loop\n");
+			rt = pthread_cond_timedwait(&proxyparam_var.cond, &proxyparam_var.lock, &timeToWait);
+			if (rt == EINVAL)
+			{
+				dprintf("EINVAL thrown\n");
+				break;
+			}
+		}
 	pthread_mutex_unlock(&proxyparam_var.lock);
+	dprintf("Unlocking mutex in downstream thread\n");
 	pthread_cond_destroy(&proxyparam_var.cond);
 #endif
 	
@@ -564,8 +580,8 @@ void* DownstreamCommunication(void *pParam)
 
 
     timeToWait.tv_sec = now.tv_sec+60;
-    timeToWait.tv_nsec = (now.tv_usec+1000UL*60000)*1000UL;
-
+    timeToWait.tv_nsec = (now.tv_usec*1000UL) + ((60*1000)%1000UL)*1000000;
+    timeToWait.tv_nsec %= 1000000000;
 	pthread_mutex_lock(&proxyparam_var.lock);
 
 	while ((*(proxyparam_var.childThreadExit) == FALSE)&&(rt!=ETIMEDOUT))
@@ -595,8 +611,10 @@ void* UpstreamCommunication(void *pParam)
 	struct hostent *server_hostent_struct_ptr;
 	SOCKET  conn_socket;
 
+	proxyparam_ptr->Address[MAXADDRESSLEN]=0;
 	socket_type = SOCK_STREAM;
 	server_name = proxyparam_ptr->Address;	// Address of the remote server from the client's request
+	printf("UpstreamCommunication: Server connecting to %s", proxyparam_ptr->Address);
 	port = proxyparam_ptr->Port;			// Port of the remote server from the client's request
 
 	if (isalpha(server_name[0])) {   /* server address is a name */
@@ -616,8 +634,9 @@ void* UpstreamCommunication(void *pParam)
 			server_name);
 		pthread_mutex_lock(&proxyparam_ptr->lock);
 		proxyparam_ptr->User_SvrOK = TRUE;
-		pthread_mutex_unlock(&proxyparam_ptr->lock);
 		pthread_cond_signal(&proxyparam_ptr->cond);
+		pthread_mutex_unlock(&proxyparam_ptr->lock);
+		
 #endif
 		
 		////return 0;
@@ -658,11 +677,17 @@ void* UpstreamCommunication(void *pParam)
 		printf("\n\n[ERROR]: connect() failed: %d\n", WSAGetLastError());
 		::SetEvent(proxyparam_ptr->User_SvrOK);
 #elif defined __linux__
-		printf("\n\n[ERROR]: connect() failed\n");
+		perror("\n\n[ERROR]: connect() failed\n");
+		dprintf("UpstreamCommunication: before pthread_mutex_lock\n");
 		pthread_mutex_lock(&proxyparam_ptr->lock);
+		dprintf("UpstreamCommunication: in pthread_mutex_lock\n");
 		proxyparam_ptr->User_SvrOK = TRUE;
-		pthread_mutex_unlock(&proxyparam_ptr->lock);
 		pthread_cond_signal(&proxyparam_ptr->cond);
+		dprintf("UpstreamCommunication: after pthread_cond_signal\n");
+		pthread_mutex_unlock(&proxyparam_ptr->lock);
+		dprintf("UpstreamCommunication: after pthread_mutex_lock\n");
+		
+		
 #endif
 		////return -1;
 	}
@@ -673,10 +698,14 @@ void* UpstreamCommunication(void *pParam)
 #ifdef _WIN32
 	::SetEvent(proxyparam_ptr->User_SvrOK);
 #elif defined __linux__
+	dprintf("UpstreamCommunication: before pthread_mutex_lock\n");
 	pthread_mutex_lock(&proxyparam_ptr->lock);
+	dprintf("UpstreamCommunication: in mutex\n");
 	proxyparam_ptr->User_SvrOK = TRUE;
 	pthread_mutex_unlock(&proxyparam_ptr->lock);
+	dprintf("UpstreamCommunication: after pthread_mutex_lock\n");
 	pthread_cond_signal(&proxyparam_ptr->cond);
+	dprintf("UpstreamCommunication: after pthread_cond_signal\n");
 #endif
 	
 	// Loop to forward communication between client and remote server
